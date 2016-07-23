@@ -1,7 +1,7 @@
-use  super::{Agent, Catalog, Health, Keystore, Session};
+use super::{Agent, Catalog, Health, Keystore, Session};
 
 /// provides a client to the Consul API
-pub struct Client{
+pub struct Client {
     /// agent endpoint
     pub agent: Agent,
     /// catalog endpoint
@@ -9,7 +9,7 @@ pub struct Client{
     /// health endpoint
     pub health: Health,
     pub keystore: Keystore,
-    pub session: Session
+    pub session: Session,
 }
 
 impl Client {
@@ -21,11 +21,11 @@ impl Client {
         let keystore = Keystore::new(address);
         let session = Session::new(address);
         Client {
-            agent:agent,
+            agent: agent,
             catalog: catalog,
             health: health,
             session: session,
-            keystore: keystore
+            keystore: keystore,
         }
     }
 }

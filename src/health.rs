@@ -6,15 +6,14 @@ use rustc_serialize::json;
 use super::HealthService;
 
 /// Health can be used to query the Health endpoints
-pub struct Health{
+pub struct Health {
     endpoint: String,
 }
 
 
 impl Health {
-
     pub fn new(address: &str) -> Health {
-        Health{endpoint: format!("{}/v1/health", address)}
+        Health { endpoint: format!("{}/v1/health", address) }
     }
 
     fn request(&self, url: &str) -> Vec<HealthService> {
@@ -23,11 +22,12 @@ impl Health {
         json::decode(result).unwrap()
     }
 
-   // Rust does not support default parameters or optional parameters for now, so `tag` must be provided
-    pub fn service(&self, name: &str, o_tag: Option<&str>) -> Vec<HealthService>{
+    // Rust does not support default parameters or optional parameters for now,
+    // so `tag` must be provided
+    pub fn service(&self, name: &str, o_tag: Option<&str>) -> Vec<HealthService> {
         let url = match o_tag {
             Some(value) => format!("{}/service/{}?tag={}", self.endpoint, name, value),
-            None => format!("{}/service/{}", self.endpoint, name)
+            None => format!("{}/service/{}", self.endpoint, name),
         };
         self.request(&url)
     }
@@ -38,18 +38,22 @@ impl Health {
         let result = from_utf8(resp.get_body()).unwrap();
         let json_data = match json::Json::from_str(result) {
             Ok(value) => value,
-            Err(err) => return Err(format!("consul: Could not convert to json: {:?}. Err: {}", result, err))
+            Err(err) => {
+                return Err(format!("consul: Could not convert to json: {:?}. Err: {}",
+                                   result,
+                                   err))
+            }
         };
         let v_nodes = json_data.as_array().unwrap();
         let mut filtered: Vec<String> = Vec::new();
         for node in v_nodes.iter() {
             let ip = match super::get_string(node, &["Node", "Address"]) {
                 Some(val) => val,
-                None => continue
+                None => continue,
             };
             let checks = match node.find_path(&["Checks"]) {
                 Some(val) => val.as_array().unwrap(),
-                None => continue
+                None => continue,
             };
             let mut healthy = true;
             for check in checks {
@@ -74,14 +78,14 @@ impl Health {
         }
         Ok(filtered)
     }
-    
+
     pub fn get_healthy_nodes(&self, service_id: &str) -> Result<Vec<String>, String> {
         let url = format!("{}/checks/{}", self.endpoint, service_id);
         let resp = http::handle().get(url).exec().unwrap();
         let result = from_utf8(resp.get_body()).unwrap();
         let json_data = match json::Json::from_str(result) {
             Ok(value) => value,
-            Err(_) => return Err(format!("consul: Could not convert to json: {:?}", result))
+            Err(_) => return Err(format!("consul: Could not convert to json: {:?}", result)),
         };
         let v_nodes = json_data.as_array().unwrap();
         let mut filtered: Vec<String> = Vec::new();

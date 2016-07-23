@@ -57,11 +57,11 @@ use rustc_serialize::json;
 pub fn get_string(json_data: &json::Json, path: &[&str]) -> Option<String> {
     let value = match json_data.find_path(path) {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     let s_value = match value.as_string() {
         Some(value) => value,
-        None => return None
+        None => return None,
     };
     Some(s_value.to_owned())
 }

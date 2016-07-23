@@ -18,7 +18,7 @@ pub struct Service {
 
 /// HealthService is used for the health service
 #[derive(RustcDecodable, RustcEncodable)]
-pub struct HealthService{
+pub struct HealthService {
     pub Node: Node,
     pub Service: Service,
 }
@@ -30,7 +30,7 @@ pub struct RegisterService {
     pub Name: String,
     pub Tags: Vec<String>,
     pub Port: u16,
-    pub Address: String
+    pub Address: String,
 }
 
 #[derive(RustcDecodable, RustcEncodable, Debug)]
@@ -39,6 +39,5 @@ pub struct TtlHealthCheck {
     pub ID: String,
     pub Name: String,
     pub Notes: String,
-    pub TTL: String
+    pub TTL: String,
 }
-
