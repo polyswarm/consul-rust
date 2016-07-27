@@ -1,112 +1,112 @@
 #![allow(non_snake_case)]
 
-use std::str::from_utf8;
+use std::rc::Rc;
 use std::collections::HashMap;
-
+use std::io::Read;
 use rustc_serialize::json;
-use curl::http;
-
-use super::{Service, RegisterService, TtlHealthCheck};
+use hyper::client::{Client, Response};
+use hyper::status::StatusCode;
+use hyper::Url;
+use super::{Service, TtlHealthCheck};
+use super::consul_error::ConsulError;
+use super::structs::AgentMember;
 
 /// Agent can be used to query the Agent endpoints
 pub struct Agent {
     endpoint: String,
+    client: Rc<Client>,
 }
-
-/// AgentMember represents a cluster member known to the agent
-#[derive(RustcDecodable, RustcEncodable)]
-pub struct AgentMember {
-    Name: String,
-    Addr: String,
-    Port: u16,
-    Tags: HashMap<String, String>,
-    Status: usize,
-    ProtocolMin: u8,
-    ProtocolMax: u8,
-    ProtocolCur: u8,
-    DelegateMin: u8,
-    DelegateMax: u8,
-    DelegateCur: u8,
-}
-
 
 impl Agent {
-    pub fn new(address: &str) -> Agent {
-        Agent { endpoint: format!("{}/v1/agent", address) }
-    }
-
-    pub fn services(&self) -> HashMap<String, Service> {
-        let url = format!("{}/services", self.endpoint);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        json::decode(result).unwrap()
-    }
-
-    pub fn members(&self) -> Vec<AgentMember> {
-        let url = format!("{}/members", self.endpoint);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        json::decode(result).unwrap()
-    }
-
-    pub fn register(&self, service: RegisterService) {
-        let url = format!("{}/service/register", self.endpoint);
-        let json_str = json::encode(&service).unwrap();
-        let resp = http::handle()
-            .put(url, &json_str)
-            .content_type("application/json")
-            .exec()
-            .unwrap();
-        if resp.get_code() != 200 {
-            panic!("Consul: Error registering a service!");
+    pub fn new(client: Rc<Client>, address: &str) -> Agent {
+        Agent {
+            endpoint: format!("http://{}/v1/agent", address),
+            client: client,
         }
     }
 
-    pub fn register_ttl_check(&self, health_check: TtlHealthCheck) {
-        let url = format!("{}/check/register", self.endpoint);
-        let json_str = json::encode(&health_check).unwrap();
-        let resp = http::handle()
-            .put(url, &json_str)
-            .content_type("application/json")
-            .exec()
-            .unwrap();
-        if resp.get_code() != 200 {
-            panic!("Consul: Error registering a health check!");
+    // TODO: Implement https://www.consul.io/docs/agent/http/agent.html#agent_checks
+
+    /// https://www.consul.io/docs/agent/http/agent.html#agent_services
+    pub fn services(&self) -> Result<HashMap<String, Service>, ConsulError> {
+        Url::parse(&format!("{}/services", self.endpoint))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
+    }
+
+    /// https://www.consul.io/docs/agent/http/agent.html#agent_members
+    pub fn members(&self) -> Result<Vec<AgentMember>, ConsulError> {
+        Url::parse(&format!("{}/members", self.endpoint))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
+    }
+
+    /// https://www.consul.io/docs/agent/http/agent.html#agent_check_register
+    pub fn register_ttl_check(&self, health_check: &TtlHealthCheck) -> Result<(), ConsulError> {
+        if let Ok(json) = json::encode(&health_check) {
+            Url::parse(&format!("{}/check/register", self.endpoint))
+                .map_err(|_| ConsulError::BadURL)
+                .and_then(|url| {
+                    self.client.post(url).body(&json).send().map_err(|_| ConsulError::HTTPFailure)
+                })
+                .and_then(|response: Response| {
+                    match response.status {
+                        StatusCode::Ok => Ok(()),
+                        _ => Err(ConsulError::RemoteFailure),
+                    }
+                })
+        } else {
+            Err(ConsulError::BadJSON)
         }
     }
 
-    pub fn check_pass(&self, service_id: String) {
-        let url = format!("{}/check/pass/{}", self.endpoint, service_id);
-        http::handle().get(url).exec().unwrap();
+    /// https://www.consul.io/docs/agent/http/agent.html#agent_check_pass
+    pub fn check_pass(&self, check_id: &str, note: Option<&str>) -> Result<(), ConsulError> {
+        match note {
+                Some(n) => {
+                    Url::parse(&format!("{}/check/pass/{}?note={}", self.endpoint, check_id, n))
+                }
+                None => Url::parse(&format!("{}/check/pass/{}", self.endpoint, check_id)),
+            }
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|response: Response| {
+                match response.status {
+                    StatusCode::Ok => Ok(()),
+                    _ => Err(ConsulError::RemoteFailure),
+                }
+            })
     }
 
-    pub fn get_self_name(&self) -> Option<String> {
-        let url = format!("{}/self", self.endpoint);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(err) => {
-                panic!("consul: Could not convert to json: {:?}, Err: {}",
-                       result,
-                       err)
-            }
-        };
-        super::get_string(&json_data, &["Config", "NodeName"])
-    }
 
-    pub fn get_self_address(&self) -> Option<String> {
-        let url = format!("{}/self", self.endpoint);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(err) => {
-                panic!("consul: Could not convert to json: {:?}. Err: {}",
-                       result,
-                       err)
-            }
-        };
-        super::get_string(&json_data, &["Config", "AdvertiseAddr"])
+    // TODO: Structure the json returned
+    /// https://www.consul.io/docs/agent/http/agent.html#agent_self
+    pub fn get_self(&self) -> Result<String, ConsulError> {
+        Url::parse(&format!("{}/self", self.endpoint))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
     }
 }

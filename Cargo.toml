@@ -16,5 +16,7 @@ exclude = [
 ]
 
 [dependencies]
-curl = "0.2.19"
-rustc-serialize = "0.3.19"
+hyper = "*"
+rustc-serialize = "*"
+log = "*"
+env_logger = "*"

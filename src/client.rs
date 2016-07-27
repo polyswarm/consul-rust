@@ -1,31 +1,24 @@
-use super::{Agent, Catalog, Health, Keystore, Session};
 
-/// provides a client to the Consul API
+use super::Agent;
+use super::Catalog;
+use super::Health;
+use hyper::client::Client as HttpClient;
+use std::rc::Rc;
+
 pub struct Client {
-    /// agent endpoint
     pub agent: Agent,
-    /// catalog endpoint
     pub catalog: Catalog,
-    /// health endpoint
     pub health: Health,
-    pub keystore: Keystore,
-    pub session: Session,
 }
+// TODO: change to Rc
 
 impl Client {
-    /// Constructs a consul client
     pub fn new(address: &str) -> Client {
-        let agent = Agent::new(address);
-        let catalog = Catalog::new(address);
-        let health = Health::new(address);
-        let keystore = Keystore::new(address);
-        let session = Session::new(address);
+        let http_client = Rc::new(HttpClient::new());
         Client {
-            agent: agent,
-            catalog: catalog,
-            health: health,
-            session: session,
-            keystore: keystore,
+            agent: Agent::new(http_client.clone(), address),
+            catalog: Catalog::new(http_client.clone(), address),
+            health: Health::new(http_client.clone(), address),
         }
     }
 }

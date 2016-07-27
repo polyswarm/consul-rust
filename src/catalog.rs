@@ -1,68 +1,68 @@
-use std::str::from_utf8;
+
+use std::rc::Rc;
 use std::collections::HashMap;
-
+use std::io::Read;
+use hyper::client::{Client, Response};
 use rustc_serialize::json;
-use curl::http;
-use structs::Node;
 
-/// Catalog can be used to query the Catalog endpoints
+use hyper::Url;
+use super::consul_error::ConsulError;
+
+// Catalog can be used to query the Catalog endpoints
 pub struct Catalog {
     endpoint: String,
+    client: Rc<Client>,
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
 #[allow(non_snake_case)]
 pub struct ServiceNode {
-    Address: String,
     Node: String,
-    ServiceAddress: String,
+    Address: String,
     ServiceID: String,
     ServiceName: String,
-    ServicePort: u16,
     ServiceTags: Vec<String>,
+    ServiceAddress: String,
+    ServicePort: u16,
 }
 
-
 impl Catalog {
-    pub fn new(address: &str) -> Catalog {
-        Catalog { endpoint: format!("{}/v1/catalog", address) }
-    }
-
-    pub fn services(&self) -> HashMap<String, Vec<String>> {
-        let url = format!("{}/services", self.endpoint);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        json::decode(result).unwrap()
-    }
-
-    pub fn get_nodes(&self, service: String) -> Vec<Node> {
-        let url = format!("{}/service/{}", self.endpoint, service);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(err) => {
-                panic!("consul: Could not convert to json: {:?}. Err: {}",
-                       result,
-                       err)
-            }
-        };
-        let v_nodes = json_data.as_array().unwrap();
-        let mut filtered: Vec<Node> = Vec::new();
-        for node in v_nodes.iter() {
-            let node_value = match super::get_string(node, &["Node"]) {
-                Some(val) => val,
-                None => panic!("consul: Could not find 'Node' in: {:?}", &node),
-            };
-            let address = match super::get_string(node, &["Address"]) {
-                Some(val) => val,
-                None => panic!("consul: Could not find 'Address' in: {:?}", &node),
-            };
-            filtered.push(Node {
-                Node: node_value,
-                Address: address,
-            });
+    pub fn new(client: Rc<Client>, address: &str) -> Catalog {
+        Catalog {
+            endpoint: format!("http://{}/v1/catalog", address),
+            client: client,
         }
-        filtered
+    }
+
+    // TODO: add dc flag
+    /// https://www.consul.io/docs/agent/http/catalog.html#catalog_services
+    pub fn services(&self) -> Result<HashMap<String, Vec<String>>, ConsulError> {
+        Url::parse(&format!("{}/services", self.endpoint))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
+    }
+
+    // TODO: add dc, tag and near flags
+    /// https://www.consul.io/docs/agent/http/catalog.html#catalog_service
+    pub fn service(&self, service: &str) -> Result<Vec<ServiceNode>, ConsulError> {
+        Url::parse(&format!("{}/services/{}", self.endpoint, service))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
     }
 }

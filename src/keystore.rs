@@ -1,110 +1,116 @@
-#![allow(non_snake_case)]
-
-use std::str::from_utf8;
-
+use hyper::client::{Client, Response};
+use super::consul_error::ConsulError;
+use hyper::Url;
 use rustc_serialize::json;
-use curl::http;
+use std::collections::HashMap;
+use std::io::Read;
+use hyper::status::StatusCode;
 
-pub struct Keystore {
-    endpoint: String,
+// [
+// {
+// "CreateIndex": 100,
+// "ModifyIndex": 200,
+// "LockIndex": 200,
+// "Key": "zip",
+// "Flags": 0,
+// "Value": "dGVzdA==",
+// "Session": "adf4238a-882b-9ddc-4a9d-5b6758e4159e"
+// }
+// ]
+
+#[derive(RustcDecodable, RustcEncodable)]
+#[allow(non_snake_case)]
+pub struct KeystoreEntry {
+    CreateIndex: u32,
+    ModifyIndex: u32,
+    Key: String,
+    Flags: u32,
+    Value: String,
+    Session: String,
 }
 
-impl Keystore {
-    pub fn new(address: &str) -> Keystore {
-        Keystore { endpoint: format!("http://{}/v1/kv", address) }
-    }
+pub struct Keystore<'a> {
+    endpoint: String,
+    client: &'a Client,
+}
 
-    pub fn set_key(&self, key: String, value: String) {
-        let url = format!("{}/{}", self.endpoint, key);
-        let resp = http::handle()
-            .put(url, &value)
-            .content_type("application/json")
-            .exec()
-            .unwrap();
-        if resp.get_code() != 200 {
-            panic!("Consul: Error setting a key!");
+
+impl<'a> Keystore<'a> {
+    pub fn new(client: &'a Client, address: &str) -> Keystore<'a> {
+        Keystore {
+            endpoint: format!("{}/v1/kv", address),
+            client: client,
         }
     }
 
-    pub fn acquire_lock(&self, key: String, address: &String, session_id: &String) -> bool {
-        let url;
-        if key.to_owned().into_bytes()[0] == 0x2f {
-            url = format!("{}{}?acquire={}", self.endpoint, key, session_id);
-        } else {
-            url = format!("{}/{}?acquire={}", self.endpoint, key, session_id);
-        }
-        let resp = http::handle()
-            .put(url, address)
-            .content_type("application/json")
-            .exec()
-            .unwrap();
-        if resp.get_code() != 200 {
-            println!("Consul: Error acquiring a lock!");
-            return false;
-        }
-        let result = from_utf8(resp.get_body()).unwrap();
-        if result == "true" {
-            return true;
-        }
-        false
+    pub fn get(&self, key: &str) -> Result<Vec<KeystoreEntry>, ConsulError> {
+        Url::parse(&format!("{}/{}", self.endpoint, key))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
     }
 
-    pub fn release_lock(&self, key: String, address: &str, session_id: &String) -> bool {
-        let url;
-        if key.to_owned().into_bytes()[0] == 0x2f {
-            url = format!("{}{}?release={}", self.endpoint, key, session_id);
-        } else {
-            url = format!("{}/{}?release={}", self.endpoint, key, session_id);
-        }
-        let resp = http::handle()
-            .put(url, address)
-            .content_type("application/json")
-            .exec()
-            .unwrap();
-        if resp.get_code() != 200 {
-            panic!("Consul: Error releasing a lock!");
-        }
-        let result = from_utf8(resp.get_body()).unwrap();
-        if result == "true" {
-            return true;
-        }
-        false
+    pub fn services(&self) -> Result<HashMap<String, Vec<String>>, ConsulError> {
+        Url::parse(&format!("{}/services", self.endpoint))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.get(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
     }
 
-    pub fn get_key(&self, key: String) -> Option<String> {
-        let url;
-        if key.to_owned().into_bytes()[0] == 0x2f {
-            url = format!("{}{}", self.endpoint, key);
-        } else {
-            url = format!("{}/{}", self.endpoint, key);
-        }
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        if resp.get_code() != 200 {
-            return None;
-        }
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(err) => {
-                panic!("consul: Could not convert to json: {:?}. Err: {}",
-                       result,
-                       err)
-            }
-        };
-        let v_json = json_data.as_array().unwrap();
-        super::get_string(&v_json[0], &["Value"])
+    pub fn set(&self, key: &str, value: &str) -> Result<bool, ConsulError> {
+        Url::parse(&format!("{}/{}", self.endpoint, key))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| {
+                self.client
+                    .put(url)
+                    .body(value)
+                    .send()
+                    .map_err(|_| ConsulError::HTTPFailure)
+            })
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => {
+                        if response.status == StatusCode::Ok {
+                            if body.to_lowercase().contains("true") {
+                                Ok(true)
+                            } else {
+                                Ok(false)
+                            }
+                        } else {
+                            Err(ConsulError::RemoteFailure)
+                        }
+                    }
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+
     }
 
-    pub fn delete_key(&self, key: String) {
-        let url;
-        if key.to_owned().into_bytes()[0] == 0x2f {
-            url = format!("{}{}", self.endpoint, key);
-        } else {
-            url = format!("{}/{}", self.endpoint, key);
-        }
-        let resp = http::handle().delete(url).exec().unwrap();
-        if resp.get_code() != 200 {
-            panic!("Could not delete key: {}", key);
-        }
+    pub fn delete(&self, key: &str) -> Result<(), ConsulError> {
+        Url::parse(&format!("{}/{}", self.endpoint, key))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| self.client.delete(url).send().map_err(|_| ConsulError::HTTPFailure))
+            .and_then(|response: Response| {
+                if response.status == StatusCode::Ok {
+                    Ok(())
+                } else {
+                    Err(ConsulError::RemoteFailure)
+                }
+            })
     }
 }

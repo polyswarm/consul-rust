@@ -1,103 +1,118 @@
-use std::str::from_utf8;
+#![allow(non_snake_case)]
 
-use curl::http;
 use rustc_serialize::json;
+use hyper::client::{Client, Response};
+use hyper::Url;
+use std::io::Read;
+use super::ServiceHealth;
+use super::Check;
+use super::consul_error::ConsulError;
+use std::rc::Rc;
 
-use super::HealthService;
 
-/// Health can be used to query the Health endpoints
 pub struct Health {
     endpoint: String,
+    client: Rc<Client>,
 }
 
-
 impl Health {
-    pub fn new(address: &str) -> Health {
-        Health { endpoint: format!("{}/v1/health", address) }
+    pub fn new(client: Rc<Client>, address: &str) -> Health {
+        Health {
+            endpoint: format!("http://{}/v1/health", address),
+            client: client,
+        }
     }
 
-    fn request(&self, url: &str) -> Vec<HealthService> {
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        json::decode(result).unwrap()
-    }
-
-    // Rust does not support default parameters or optional parameters for now,
-    // so `tag` must be provided
-    pub fn service(&self, name: &str, o_tag: Option<&str>) -> Vec<HealthService> {
-        let url = match o_tag {
-            Some(value) => format!("{}/service/{}?tag={}", self.endpoint, name, value),
-            None => format!("{}/service/{}", self.endpoint, name),
-        };
-        self.request(&url)
-    }
-
-    pub fn healthy_nodes_by_service(&self, service_id: &str) -> Result<Vec<String>, String> {
-        let url = format!("{}/service/{}", self.endpoint, service_id);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(err) => {
-                return Err(format!("consul: Could not convert to json: {:?}. Err: {}",
-                                   result,
-                                   err))
-            }
-        };
-        let v_nodes = json_data.as_array().unwrap();
-        let mut filtered: Vec<String> = Vec::new();
-        for node in v_nodes.iter() {
-            let ip = match super::get_string(node, &["Node", "Address"]) {
-                Some(val) => val,
-                None => continue,
-            };
-            let checks = match node.find_path(&["Checks"]) {
-                Some(val) => val.as_array().unwrap(),
-                None => continue,
-            };
-            let mut healthy = true;
-            for check in checks {
-                let status = match super::get_string(check, &["Status"]) {
-                    Some(val) => val,
-                    None => {
-                        healthy = false;
-                        break;
+    /// https://www.consul.io/docs/agent/http/health.html#health_service
+    pub fn service(&self,
+                   name: &str,
+                   dc: Option<&str>,
+                   near: Option<&str>,
+                   tag: Option<&str>,
+                   passing: Option<bool>)
+                   -> Result<Vec<ServiceHealth>, ConsulError> {
+        Url::parse(&format!("{}/service/{}", self.endpoint, name))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|url| {
+                let mut query = String::from("?");
+                let mut use_query = false;
+                if let Some(dc) = dc {
+                    use_query = true;
+                    query.push_str("dc=");
+                    query.push_str(dc);
+                }
+                if let Some(near) = near {
+                    if use_query {
+                        query.push('&');
                     }
+                    use_query = true;
+                    query.push_str("near=");
+                    query.push_str(near);
+                }
+                if let Some(tag) = tag {
+                    if use_query {
+                        query.push('&');
+                    }
+                    use_query = true;
+                    query.push_str("tag=");
+                    query.push_str(tag);
+                }
+                if let Some(passing) = passing {
+                    if use_query {
+                        query.push('&');
+                    }
+                    use_query = true;
+                    query.push_str(&format!("passing={}", passing));
+                }
+                // TODO: This doesn't seem correct.  I must test it and clean it up
+                let f = if use_query {
+                    format!("{}{}", url, query)
+                } else {
+                    format!("{}", url)
                 };
-                if !healthy {
-                    break;
+                self.client.get(&f).send().map_err(|_| ConsulError::HTTPFailure)
+            })
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
                 }
-                if status != "passing" {
-                    healthy = false;
-                    break;
-                }
-            }
-            if healthy {
-                filtered.push(ip.to_owned());
-            }
-        }
-        Ok(filtered)
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
     }
 
-    pub fn get_healthy_nodes(&self, service_id: &str) -> Result<Vec<String>, String> {
-        let url = format!("{}/checks/{}", self.endpoint, service_id);
-        let resp = http::handle().get(url).exec().unwrap();
-        let result = from_utf8(resp.get_body()).unwrap();
-        let json_data = match json::Json::from_str(result) {
-            Ok(value) => value,
-            Err(_) => return Err(format!("consul: Could not convert to json: {:?}", result)),
-        };
-        let v_nodes = json_data.as_array().unwrap();
-        let mut filtered: Vec<String> = Vec::new();
-        for node in v_nodes.iter() {
-            if let Some(status) = super::get_string(node, &["Status"]) {
-                if status == "passing" {
-                    if let Some(node_value) = super::get_string(node, &["Node"]) {
-                        filtered.push(node_value);
-                    }
+    /// https://www.consul.io/docs/agent/http/health.html#health_checks
+    pub fn checks(&self,
+                  name: &str,
+                  dc: Option<&str>,
+                  near: Option<&str>,
+                  passing: Option<bool>)
+                  -> Result<Vec<Check>, ConsulError> {
+        Url::parse(&format!("{}/checks/{}", self.endpoint, name))
+            .map_err(|_| ConsulError::BadURL)
+            .and_then(|mut url| {
+                let mut query_pairs = url.query_pairs_mut();
+                if let Some(dc) = dc {
+                    query_pairs.append_pair("dc", dc);
                 }
-            }
-        }
-        Ok(filtered)
+                if let Some(near) = near {
+                    query_pairs.append_pair("near", near);
+                }
+                if let Some(passing) = passing {
+                    query_pairs.append_pair("passing", &format!("{}", passing));
+                }
+                // TODO: This doesn't seem correct.  I must test it and clean it up
+                let f = query_pairs.finish().to_owned();
+                self.client.get(f).send().map_err(|_| ConsulError::HTTPFailure)
+            })
+            .and_then(|mut response: Response| {
+                let mut body: String = String::new();
+                match response.read_to_string(&mut body) {
+                    Ok(_) => Ok(body),
+                    Err(_) => Err(ConsulError::HTTPFailure),
+                }
+            })
+            .and_then(|body| json::decode(&body).map_err(|_| ConsulError::BadJSON))
     }
 }
