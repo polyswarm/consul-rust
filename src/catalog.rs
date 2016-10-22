@@ -1,5 +1,5 @@
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::collections::HashMap;
 use std::io::Read;
 use hyper::client::{Client, Response};
@@ -9,9 +9,10 @@ use hyper::Url;
 use super::consul_error::ConsulError;
 
 // Catalog can be used to query the Catalog endpoints
+#[derive(Clone)]
 pub struct Catalog {
     endpoint: String,
-    client: Rc<Client>,
+    client: Arc<Client>,
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -27,7 +28,7 @@ pub struct ServiceNode {
 }
 
 impl Catalog {
-    pub fn new(client: Rc<Client>, address: &str) -> Catalog {
+    pub fn new(client: Arc<Client>, address: &str) -> Catalog {
         Catalog {
             endpoint: format!("http://{}/v1/catalog", address),
             client: client,

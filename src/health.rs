@@ -7,16 +7,16 @@ use std::io::Read;
 use super::ServiceHealth;
 use super::Check;
 use super::consul_error::ConsulError;
-use std::rc::Rc;
+use std::sync::Arc;
 
-
+#[derive(Clone)]
 pub struct Health {
     endpoint: String,
-    client: Rc<Client>,
+    client: Arc<Client>,
 }
 
 impl Health {
-    pub fn new(client: Rc<Client>, address: &str) -> Health {
+    pub fn new(client: Arc<Client>, address: &str) -> Health {
         Health {
             endpoint: format!("http://{}/v1/health", address),
             client: client,

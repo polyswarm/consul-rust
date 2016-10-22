@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::collections::HashMap;
 use std::io::Read;
 use rustc_serialize::json;
@@ -12,13 +12,14 @@ use super::consul_error::ConsulError;
 use super::structs::AgentMember;
 
 /// Agent can be used to query the Agent endpoints
+#[derive(Clone)]
 pub struct Agent {
     endpoint: String,
-    client: Rc<Client>,
+    client: Arc<Client>,
 }
 
 impl Agent {
-    pub fn new(client: Rc<Client>, address: &str) -> Agent {
+    pub fn new(client: Arc<Client>, address: &str) -> Agent {
         Agent {
             endpoint: format!("http://{}/v1/agent", address),
             client: client,
