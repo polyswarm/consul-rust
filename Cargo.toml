@@ -16,7 +16,7 @@ exclude = [
 ]
 
 [dependencies]
-hyper = "*"
+hyper = "0.10"
 rustc-serialize = "*"
 log = "*"
 env_logger = "*"
