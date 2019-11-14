@@ -5,7 +5,7 @@ use consul::{Client, Config};
 #[test]
 fn session_test() {
     use consul::session::Session;
-    let config = Config::new().unwrap();
+    let config = Config::new(None, None).unwrap();
     let client = Client::new(config);
     let r = client.list(None).unwrap();
     assert!(r.0.is_empty());
