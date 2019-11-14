@@ -22,14 +22,16 @@ use std::time::Duration;
 
 use reqwest::ClientBuilder;
 use reqwest::Client as HttpClient;
+use reqwest::header::HeaderValue;
 
-use errors::{Result, ResultExt};
+use errors::{Result, ResultExt, ErrorKind};
 
 
 
 #[derive(Clone, Debug)]
 pub struct Client {
     config: Config,
+
 }
 
 impl Client {
@@ -44,10 +46,18 @@ pub struct Config {
     pub datacenter: Option<String>,
     pub http_client: HttpClient,
     pub wait_time: Option<Duration>,
+    pub token: Option<HeaderValue>,
 }
 
 impl Config {
-    pub fn new() -> Result<Config> {
+    pub fn new(token: Option<String>) -> Result<Config> {
+        let token: Option<HeaderValue> = if let Some(t) = token {
+            HeaderValue::from_str(&t).map_err(|_| {
+                ErrorKind::ConsulError
+            })?.into()
+        } else {
+            None
+        };
        ClientBuilder::new()
             .build()
             .chain_err(|| "Failed to build reqwest client")
@@ -56,6 +66,7 @@ impl Config {
                 datacenter: None,
                 http_client: client,
                 wait_time: None,
+                token,
             })
     }
 }

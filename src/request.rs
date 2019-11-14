@@ -5,7 +5,7 @@ use std::str;
 use std::str::FromStr;
 use std::time::Instant;
 
-use reqwest::header::HeaderValue;
+use reqwest::header::{HeaderValue, HeaderName};
 use reqwest::Client as HttpClient;
 use reqwest::RequestBuilder;
 use reqwest::StatusCode;
@@ -41,7 +41,13 @@ pub fn get_vec<R: DeserializeOwned>(
     let url =
         Url::parse_with_params(&url_str, params.iter()).chain_err(|| "Failed to parse URL")?;
     let start = Instant::now();
-    let response = config.http_client.get(url).send();
+    let builder = config.http_client.get(url);
+    let builder = if let Some(ref token) = config.token {
+        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+    } else {
+        builder
+    };
+    let response = builder.send();
     response
         .chain_err(|| "HTTP request to consul failed")
         .and_then(|mut r| {
@@ -105,7 +111,13 @@ pub fn get<R: DeserializeOwned>(
     let url =
         Url::parse_with_params(&url_str, params.iter()).chain_err(|| "Failed to parse URL")?;
     let start = Instant::now();
-    let response = config.http_client.get(url).send();
+    let builder = config.http_client.get(url);
+    let builder = if let Some(ref token) = config.token {
+        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+    } else {
+        builder
+    };
+    let response = builder.send();
     response
         .chain_err(|| "HTTP request to consul failed")
         .and_then(|mut r| {
@@ -194,6 +206,11 @@ where
     let url =
         Url::parse_with_params(&url_str, params.iter()).chain_err(|| "Failed to parse URL")?;
     let builder = req(&config.http_client, url);
+    let builder = if let Some(ref token) = config.token {
+        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+    } else {
+        builder
+    };
     let builder = if let Some(b) = body {
         builder.json(b)
     } else {
