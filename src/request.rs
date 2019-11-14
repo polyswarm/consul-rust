@@ -5,15 +5,15 @@ use std::str;
 use std::str::FromStr;
 use std::time::Instant;
 
-use reqwest::header::{HeaderValue, HeaderName};
+use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::Client as HttpClient;
 use reqwest::RequestBuilder;
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::{Config, QueryMeta, QueryOptions, WriteMeta, WriteOptions};
 use crate::errors::{Result, ResultExt};
+use crate::{Config, QueryMeta, QueryOptions, WriteMeta, WriteOptions};
 
 pub fn get_vec<R: DeserializeOwned>(
     path: &str,
