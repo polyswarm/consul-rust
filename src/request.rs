@@ -43,7 +43,7 @@ pub fn get_vec<R: DeserializeOwned>(
     let start = Instant::now();
     let builder = config.http_client.get(url);
     let builder = if let Some(ref token) = config.token {
-        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+        builder.header(HeaderName::from_static("x-consul-token"), token)
     } else {
         builder
     };
@@ -207,7 +207,7 @@ where
         Url::parse_with_params(&url_str, params.iter()).chain_err(|| "Failed to parse URL")?;
     let builder = req(&config.http_client, url);
     let builder = if let Some(ref token) = config.token {
-        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+        builder.header(HeaderName::from_static("x-consul-token"), token)
     } else {
         builder
     };
