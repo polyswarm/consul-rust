@@ -113,7 +113,7 @@ pub fn get<R: DeserializeOwned>(
     let start = Instant::now();
     let builder = config.http_client.get(url);
     let builder = if let Some(ref token) = config.token {
-        builder.header(HeaderName::from_static("X-Consul-Token"), token)
+        builder.header(HeaderName::from_static("x-consul-token"), token)
     } else {
         builder
     };
