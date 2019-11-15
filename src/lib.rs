@@ -45,9 +45,9 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(address: Option<String>, token: Option<String>) -> Result<Config> {
-        let token: Option<HeaderValue> = if let Some(t) = token {
-            HeaderValue::from_str(&t)
+    pub fn new(address: Option<&str>, token: Option<&str>) -> Result<Config> {
+        let token: Option<HeaderValue> = if let Some(ref t) = token {
+            HeaderValue::from_str(t)
                 .map_err(|_| ErrorKind::ConsulError)?
                 .into()
         } else {
@@ -58,7 +58,7 @@ impl Config {
             .build()
             .chain_err(|| "Failed to build reqwest client")
             .map(|client| Config {
-                address: address.unwrap_or_else(|| "http://localhost:8500".into()),
+                address: address.unwrap_or_else(|| "http://localhost:8500").into(),
                 datacenter: None,
                 http_client: client,
                 wait_time: None,
